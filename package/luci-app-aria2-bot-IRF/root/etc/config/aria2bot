@@ -1,8 +1,0 @@
-config aria2bot 'main'
-	option bot_token ''
-	option allowed_users ''
-	option aria2_rpc_url 'http://localhost:6800/jsonrpc'
-	option aria2_rpc_secret ''
-	option max_concurrent_downloads '2'
-	option download_dir '/mnt/sda1/downloads'
-	option enabled '0'

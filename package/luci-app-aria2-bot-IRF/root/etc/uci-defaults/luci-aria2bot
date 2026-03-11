@@ -1,9 +1,0 @@
-#!/bin/sh
-uci -q batch << EOB
-  set aria2bot.main=aria2bot
-  commit aria2bot
-EOB
-
-# Clear LuCI cache
-rm -rf /tmp/luci-*
-exit 0
