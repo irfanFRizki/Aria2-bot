@@ -3,7 +3,8 @@ name: Build IPK Package
 on:
   push:
     branches: [ main, master ]
-    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
@@ -13,63 +14,99 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set build info
-        id: info
+      - name: Set up build environment
         run: |
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF#refs/tags/v}"
+          sudo apt-get update -qq
+          sudo apt-get install -y build-essential git wget unzip python3
+
+      - name: Generate version & changelog
+        id: version
+        run: |
+          # ── Versi otomatis dari jumlah commit ─────────────────────────
+          COMMIT_COUNT=$(git rev-list --count HEAD)
+          MAJOR=1
+          MINOR=$(( COMMIT_COUNT / 10 ))
+          PATCH=$(( COMMIT_COUNT % 10 ))
+          AUTO_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          RELEASE=1
+          DATE=$(date '+%Y-%m-%d')
+
+          echo "version=${AUTO_VERSION}" >> $GITHUB_OUTPUT
+          echo "release=${RELEASE}"      >> $GITHUB_OUTPUT
+          echo "date=${DATE}"            >> $GITHUB_OUTPUT
+          echo "tag=v${AUTO_VERSION}"    >> $GITHUB_OUTPUT
+
+          # ── Update versi di Makefile ───────────────────────────────────
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${AUTO_VERSION}/" Makefile
+          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=${RELEASE}/"      Makefile
+
+          # ── Changelog dari commit messages ─────────────────────────────
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -n "$LAST_TAG" ]; then
+            COMMITS=$(git log ${LAST_TAG}..HEAD --pretty=format:"* %s" --no-merges)
           else
-            VERSION="1.0.0-git$(git rev-parse --short HEAD)"
+            COMMITS=$(git log --pretty=format:"* %s" --no-merges -20)
           fi
-          BUILD_DATE=$(date '+%Y-%m-%d')
-          COMMIT=$(git rev-parse HEAD)
-          BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
-          BUILD_NUM="${GITHUB_RUN_NUMBER}"
-          PKG="luci-app-aria2-bot-IRF_${VERSION}_all.ipk"
+          [ -z "$COMMITS" ] && COMMITS="* Initial release"
 
-          CHANGED=""
-          while IFS= read -r f; do
-            [ -n "$f" ] && CHANGED="${CHANGED}* Update $(basename $f)"$'\n'
-          done < <(git diff-tree --no-commit-id -r --name-only HEAD)
-          [ -z "$CHANGED" ] && CHANGED="* Initial release"$'\n'
+          cat > /tmp/changelog.md << CHANGELOG
+          v${AUTO_VERSION} — ${DATE}
 
-          echo "VERSION=$VERSION"     >> $GITHUB_OUTPUT
-          echo "DATE=$BUILD_DATE"     >> $GITHUB_OUTPUT
-          echo "COMMIT=$COMMIT"       >> $GITHUB_OUTPUT
-          echo "BRANCH=$BRANCH"       >> $GITHUB_OUTPUT
-          echo "BUILD_NUM=$BUILD_NUM" >> $GITHUB_OUTPUT
-          echo "PKG=$PKG"             >> $GITHUB_OUTPUT
-          { echo "CHANGED<<EOF"; printf '%s' "$CHANGED"; echo "EOF"; } >> $GITHUB_OUTPUT
+          **Perubahan**
+          ${COMMITS}
+
+          **Info Build**
+          * Commit: \`${{ github.sha }}\`
+          * Branch: \`${{ github.ref_name }}\`
+          * Build: \`#${{ github.run_number }}\`
+
+          ---
+          **Cara Install**
+          \`\`\`bash
+          scp luci-app-aria2-bot-IRF_*.ipk root@192.168.1.1:/tmp/
+          ssh root@192.168.1.1 "opkg install /tmp/luci-app-aria2-bot-IRF_*.ipk"
+          \`\`\`
+          Lalu buka LuCI → **Services → Aria2 Bot → Settings**
+          CHANGELOG
+
+          echo "changelog_file=/tmp/changelog.md" >> $GITHUB_OUTPUT
 
       - name: Build IPK
         run: |
           chmod +x scripts/build-ipk.sh
-          bash scripts/build-ipk.sh "${{ steps.info.outputs.VERSION }}"
+          bash scripts/build-ipk.sh "${{ steps.version.outputs.version }}"
 
-      - name: Upload Artifact (setiap build)
+      - name: Rename IPK
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          for f in dist/*.ipk; do
+            NEW="dist/luci-app-aria2-bot-IRF_${VERSION}_all.ipk"
+            [ "$f" != "$NEW" ] && mv "$f" "$NEW" || true
+          done
+          ls -lh dist/
+
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: luci-app-aria2-bot-IRF-${{ steps.info.outputs.VERSION }}
+          name: luci-app-aria2-bot-IRF-${{ steps.version.outputs.version }}
           path: dist/*.ipk
           retention-days: 30
 
-      - name: Create Release (hanya saat tag v*)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+      - name: Create Release
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        uses: softprops/action-gh-release@v1
         with:
-          name: "Aria2 Bot v${{ steps.info.outputs.VERSION }} (${{ steps.info.outputs.DATE }}) Latest"
-          body: |
-            v${{ steps.info.outputs.VERSION }} — ${{ steps.info.outputs.DATE }}
-
-            **Perubahan**
-            ${{ steps.info.outputs.CHANGED }}
-            **Info Build**
-            * Commit: `${{ steps.info.outputs.COMMIT }}`
-            * Branch: `${{ steps.info.outputs.BRANCH }}`
-            * Build: `#${{ steps.info.outputs.BUILD_NUM }}`
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "Aria2 Bot v${{ steps.version.outputs.version }} (${{ steps.version.outputs.date }}) Latest"
+          body_path: /tmp/changelog.md
           files: dist/*.ipk
+          draft: false
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
