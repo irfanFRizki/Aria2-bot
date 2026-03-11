@@ -1,0 +1,247 @@
+<%#
+  LuCI Dashboard Template for Aria2 Bot
+  /usr/lib/lua/luci/view/aria2bot/dashboard.htm
+-%>
+<%+header%>
+
+<style>
+  .card {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.15);
+    padding: 18px 22px;
+    margin-bottom: 18px;
+  }
+  .card h3 {
+    margin: 0 0 14px;
+    font-size: 15px;
+    border-bottom: 2px solid #e8e8e8;
+    padding-bottom: 8px;
+    color: #333;
+  }
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+  .badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    min-width: 72px;
+    text-align: center;
+  }
+  .badge-running  { background:#d4f7d4; color:#1a7a1a; }
+  .badge-stopped  { background:#fde8e8; color:#b02020; }
+  .badge-loading  { background:#fff3cd; color:#856404; }
+  .badge-ok       { background:#cce5ff; color:#004085; }
+  .badge-warn     { background:#fff3cd; color:#856404; }
+
+  .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .btn-sm {
+    padding: 6px 14px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: opacity .15s;
+  }
+  .btn-sm:hover { opacity: .82; }
+  .btn-green   { background: #28a745; color:#fff; }
+  .btn-red     { background: #dc3545; color:#fff; }
+  .btn-yellow  { background: #ffc107; color:#333; }
+  .btn-blue    { background: #007bff; color:#fff; }
+  .btn-grey    { background: #6c757d; color:#fff; }
+
+  .info-label { color:#888; font-size:12px; min-width:130px; }
+  .info-val   { font-family: monospace; font-size:13px; }
+  .info-row   { display:flex; align-items:center; gap:8px; margin:4px 0; }
+
+  #logbox {
+    background:#1e1e1e; color:#d4d4d4;
+    font-family: monospace; font-size:12px;
+    padding:12px; border-radius:6px;
+    height: 260px; overflow-y:auto;
+    white-space: pre-wrap; word-break: break-all;
+  }
+
+  .spinner {
+    display:inline-block; width:14px; height:14px;
+    border:2px solid #ccc; border-top-color:#555;
+    border-radius:50%; animation: spin .6s linear infinite;
+    vertical-align:middle; margin-right:5px;
+  }
+  @keyframes spin { to { transform:rotate(360deg); } }
+
+  .alert-warn {
+    background:#fff3cd; border-left:4px solid #ffc107;
+    padding:10px 14px; border-radius:4px; margin-bottom:12px;
+    font-size:13px;
+  }
+</style>
+
+<h2><%:Aria2 Bot — Dashboard%></h2>
+
+<!-- ── Config warning ──────────────────────────────────── -->
+<div id="alert-noconfig" class="alert-warn" style="display:none">
+  ⚠️ <strong>Bot Token / Chat ID belum dikonfigurasi.</strong>
+  Silakan ke menu <a href="<%=luci.dispatcher.build_url("admin","services","aria2bot","settings")%>">Settings</a> terlebih dahulu.
+</div>
+
+<!-- ── Service Status ──────────────────────────────────── -->
+<div class="cbi-section">
+<div class="cbi-section-node">
+
+<div class="card">
+  <h3>📡 Status Layanan</h3>
+
+  <!-- Telegram Bot -->
+  <div class="status-row">
+    <span style="min-width:120px; font-size:14px;">🤖 Telegram Bot</span>
+    <span id="bot-badge" class="badge badge-loading">
+      <span class="spinner"></span>Cek...
+    </span>
+    <span id="bot-detail" style="font-size:12px; color:#666;"></span>
+  </div>
+  <div class="btn-row">
+    <button class="btn-sm btn-green"  onclick="svcCtrl('start_bot')">▶ Start</button>
+    <button class="btn-sm btn-red"    onclick="svcCtrl('stop_bot')">■ Stop</button>
+    <button class="btn-sm btn-yellow" onclick="svcCtrl('restart_bot')">↺ Restart</button>
+    <button class="btn-sm btn-blue"   onclick="svcCtrl('enable_bot')">🔒 Enable Boot</button>
+    <button class="btn-sm btn-grey"   onclick="svcCtrl('disable_bot')">🔓 Disable Boot</button>
+  </div>
+
+  <hr style="margin:14px 0; border-color:#f0f0f0;">
+
+  <!-- Aria2 RPC -->
+  <div class="status-row">
+    <span style="min-width:120px; font-size:14px;">⚙️ Aria2 RPC</span>
+    <span id="aria2-badge" class="badge badge-loading">
+      <span class="spinner"></span>Cek...
+    </span>
+  </div>
+  <div class="btn-row">
+    <button class="btn-sm btn-green"  onclick="svcCtrl('start_aria2')">▶ Start</button>
+    <button class="btn-sm btn-red"    onclick="svcCtrl('stop_aria2')">■ Stop</button>
+    <button class="btn-sm btn-yellow" onclick="svcCtrl('restart_aria2')">↺ Restart</button>
+  </div>
+</div>
+
+<!-- ── Config Summary ──────────────────────────────────── -->
+<div class="card">
+  <h3>⚙️ Konfigurasi Aktif</h3>
+  <div class="info-row">
+    <span class="info-label">Bot Token</span>
+    <span class="info-val" id="cfg-token">—</span>
+  </div>
+  <div class="info-row">
+    <span class="info-label">Chat ID</span>
+    <span class="info-val" id="cfg-chatid">—</span>
+  </div>
+  <div class="info-row">
+    <span class="info-label">Aria2 RPC URL</span>
+    <span class="info-val" id="cfg-rpc">—</span>
+  </div>
+  <div class="info-row">
+    <span class="info-label">Konfigurasi</span>
+    <span id="cfg-ok" class="badge">—</span>
+  </div>
+  <div class="btn-row" style="margin-top:14px;">
+    <a href="<%=luci.dispatcher.build_url("admin","services","aria2bot","settings")%>" class="btn-sm btn-blue">
+      ✏️ Edit Settings
+    </a>
+    <button class="btn-sm btn-grey" onclick="svcCtrl('install_deps')">
+      📦 Install / Update Python Deps
+    </button>
+  </div>
+</div>
+
+<!-- ── Live Log ────────────────────────────────────────── -->
+<div class="card">
+  <h3>📋 Log Sistem</h3>
+  <div class="btn-row" style="margin-bottom:10px;">
+    <button class="btn-sm btn-blue"  onclick="fetchLog()">🔄 Refresh Log</button>
+    <button class="btn-sm btn-grey"  onclick="clearLogView()">🗑 Clear View</button>
+  </div>
+  <div id="logbox">Klik "Refresh Log" untuk melihat log...</div>
+</div>
+
+</div><!-- cbi-section-node -->
+</div><!-- cbi-section -->
+
+<script>
+(function(){
+  var API_STATUS  = "<%=luci.dispatcher.build_url("admin","services","aria2bot","api_status")%>";
+  var API_CONTROL = "<%=luci.dispatcher.build_url("admin","services","aria2bot","api_control")%>";
+  var API_LOG     = "<%=luci.dispatcher.build_url("admin","services","aria2bot","api_log")%>";
+
+  function setStatus(id, running, label){
+    var el = document.getElementById(id);
+    el.innerHTML = label || (running ? "● Running" : "● Stopped");
+    el.className = "badge " + (running ? "badge-running" : "badge-stopped");
+  }
+
+  function refreshStatus(){
+    fetch(API_STATUS)
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        setStatus("bot-badge",   d.bot_running);
+        setStatus("aria2-badge", d.aria2_running);
+
+        document.getElementById("cfg-token").textContent  = d.token_display  || "Not set";
+        document.getElementById("cfg-chatid").textContent = d.chat_id        || "Not set";
+        document.getElementById("cfg-rpc").textContent    = d.rpc_url        || "—";
+
+        var cfgOk = document.getElementById("cfg-ok");
+        if(d.configured){
+          cfgOk.textContent = "✔ Lengkap";
+          cfgOk.className = "badge badge-ok";
+          document.getElementById("alert-noconfig").style.display = "none";
+        } else {
+          cfgOk.textContent = "⚠ Belum lengkap";
+          cfgOk.className = "badge badge-warn";
+          document.getElementById("alert-noconfig").style.display = "";
+        }
+      })
+      .catch(function(){ /* silent */ });
+  }
+
+  window.svcCtrl = function(action){
+    var fd = new FormData();
+    fd.append("action", action);
+    fetch(API_CONTROL, { method:"POST", body: fd })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        alert(d.message || (d.success ? "OK" : "Gagal"));
+        setTimeout(refreshStatus, 1200);
+      })
+      .catch(function(e){ alert("Error: " + e); });
+  };
+
+  window.fetchLog = function(){
+    var box = document.getElementById("logbox");
+    box.textContent = "Mengambil log...";
+    fetch(API_LOG + "?lines=80")
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        box.textContent = d.log || "(Tidak ada log)";
+        box.scrollTop = box.scrollHeight;
+      })
+      .catch(function(){ box.textContent = "Gagal mengambil log."; });
+  };
+
+  window.clearLogView = function(){
+    document.getElementById("logbox").textContent = "";
+  };
+
+  // Auto-refresh every 8 seconds
+  refreshStatus();
+  setInterval(refreshStatus, 8000);
+})();
+</script>
+
+<%+footer%>

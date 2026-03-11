@@ -1,0 +1,101 @@
+#!/bin/sh /etc/rc.common
+# Telegram Download Bot init.d for OpenWrt
+# /etc/init.d/telegram_bot
+
+START=99
+STOP=10
+USE_PROCD=1
+
+PROG=/usr/bin/python3
+BOT_SCRIPT=/usr/bin/telegram_download_bot.py
+BOT_NAME="telegram_download_bot"
+
+_info() { logger -p daemon.info -t "$BOT_NAME" "$*"; }
+_err()  { logger -p daemon.err  -t "$BOT_NAME" "$*"; }
+
+check_config() {
+    local token
+    token="$(uci -q get aria2bot.settings.bot_token 2>/dev/null)"
+    if [ -z "$token" ]; then
+        _err "Bot Token belum dikonfigurasi! Set via LuCI > Services > Aria2 Bot > Settings"
+        return 1
+    fi
+    return 0
+}
+
+wait_for_aria2() {
+    local count=0
+    _info "Menunggu Aria2 RPC siap..."
+    while [ $count -lt 20 ]; do
+        if pgrep -x aria2c >/dev/null 2>&1; then
+            if command -v curl >/dev/null 2>&1; then
+                curl -sf -X POST http://localhost:6800/jsonrpc \
+                    -H "Content-Type: application/json" \
+                    -d '{"jsonrpc":"2.0","method":"aria2.getVersion","id":"1","params":[]}' \
+                    --max-time 2 >/dev/null 2>&1 && {
+                    _info "Aria2 RPC siap."
+                    return 0
+                }
+            else
+                return 0
+            fi
+        fi
+        sleep 2
+        count=$((count + 1))
+    done
+    _err "Timeout menunggu Aria2 RPC. Bot akan tetap dijalankan."
+    return 0
+}
+
+start_service() {
+    if [ ! -f "$BOT_SCRIPT" ]; then
+        _err "Bot script tidak ditemukan: $BOT_SCRIPT"
+        return 1
+    fi
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        _err "Python3 tidak ditemukan. Install: opkg install python3"
+        return 1
+    fi
+
+    if ! check_config; then
+        return 1
+    fi
+
+    # Start Aria2 if not running
+    if ! pgrep -x aria2c >/dev/null 2>&1; then
+        _info "Aria2 tidak berjalan, mencoba start..."
+        /etc/init.d/aria2rpc start
+        sleep 3
+    fi
+
+    wait_for_aria2
+
+    _info "Starting Telegram Download Bot..."
+
+    procd_open_instance
+    procd_set_param command "$PROG" "$BOT_SCRIPT"
+    procd_set_param respawn 3600 10 5
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_set_param pidfile /var/run/${BOT_NAME}.pid
+    procd_set_param file "$BOT_SCRIPT" "/etc/config/aria2bot"
+    procd_close_instance
+
+    _info "Telegram Download Bot started."
+}
+
+stop_service() {
+    _info "Stopping Telegram Download Bot..."
+}
+
+reload_service() {
+    stop
+    sleep 2
+    start
+}
+
+service_triggers() {
+    procd_add_reload_trigger "$BOT_NAME"
+    procd_add_reload_trigger "aria2bot"
+}

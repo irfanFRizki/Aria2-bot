@@ -1,0 +1,26 @@
+#!/bin/sh
+# uci-defaults: runs once after package install
+# Enables Aria2 Bot services on boot
+
+# Enable telegram_bot service
+/etc/init.d/telegram_bot enable 2>/dev/null || true
+
+# Enable aria2rpc service
+/etc/init.d/aria2rpc enable 2>/dev/null || true
+
+# Ensure config exists
+if ! uci -q get aria2bot.settings >/dev/null 2>&1; then
+    uci set aria2bot.settings=aria2bot
+    uci set aria2bot.settings.bot_token=''
+    uci set aria2bot.settings.chat_id=''
+    uci set aria2bot.settings.aria2_rpc_url='http://localhost:6800/jsonrpc'
+    uci set aria2bot.settings.aria2_rpc_secret=''
+    uci set aria2bot.settings.max_concurrent='2'
+    uci set aria2bot.settings.max_retry='3'
+    uci commit aria2bot
+fi
+
+# Install python dependencies in background
+/etc/aria2bot/install-deps.sh > /tmp/aria2bot-install.log 2>&1 &
+
+exit 0
