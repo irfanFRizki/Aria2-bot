@@ -1,7 +1,0 @@
-config aria2bot 'settings'
-	option enabled '0'
-	option bot_token ''
-	option allowed_users ''
-	option aria2_rpc_url 'http://localhost:6800/jsonrpc'
-	option aria2_secret ''
-	option download_dir '/tmp/downloads'
