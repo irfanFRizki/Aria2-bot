@@ -1,0 +1,296 @@
+<%+header%>
+
+<style>
+/* ── Aria2 Bot Dashboard ── */
+.aria2bot-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+.aria2bot-card {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+    box-shadow: 0 2px 4px rgba(0,0,0,.06);
+}
+.aria2bot-card .icon {
+    font-size: 2em;
+    margin-bottom: 8px;
+}
+.aria2bot-card .label {
+    font-size: .85em;
+    color: #666;
+    margin-bottom: 4px;
+}
+.aria2bot-card .value {
+    font-size: 1.4em;
+    font-weight: bold;
+}
+.status-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: .8em;
+    font-weight: bold;
+}
+.status-ok  { background: #d4edda; color: #155724; }
+.status-err { background: #f8d7da; color: #721c24; }
+.status-warn{ background: #fff3cd; color: #856404; }
+
+.aria2bot-controls {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+.aria2bot-controls button {
+    padding: 6px 14px;
+    border-radius: 4px;
+    border: 1px solid #aaa;
+    cursor: pointer;
+    font-size: .9em;
+    background: #f5f5f5;
+    transition: background .2s;
+}
+.aria2bot-controls button:hover { background: #e0e0e0; }
+.btn-green { background: #28a745 !important; color: #fff; border-color: #28a745 !important; }
+.btn-red   { background: #dc3545 !important; color: #fff; border-color: #dc3545 !important; }
+.btn-blue  { background: #007bff !important; color: #fff; border-color: #007bff !important; }
+
+table.downloads-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .9em;
+}
+table.downloads-table th,
+table.downloads-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid #eee;
+    text-align: left;
+}
+table.downloads-table th {
+    background: #f5f5f5;
+    font-weight: 600;
+}
+.progress-bar-wrap {
+    background: #eee;
+    border-radius: 4px;
+    height: 10px;
+    width: 120px;
+    display: inline-block;
+    vertical-align: middle;
+}
+.progress-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    background: #007bff;
+}
+#log-box {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    font-family: monospace;
+    font-size: .82em;
+    padding: 12px;
+    border-radius: 6px;
+    height: 160px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+</style>
+
+<h2><%:Aria2 Bot — Dashboard%></h2>
+
+<!-- Status Cards -->
+<div class="aria2bot-grid" id="status-grid">
+    <div class="aria2bot-card">
+        <div class="icon">🤖</div>
+        <div class="label"><%:Telegram Bot%></div>
+        <div class="value" id="card-bot">—</div>
+    </div>
+    <div class="aria2bot-card">
+        <div class="icon">⬇️</div>
+        <div class="label"><%:Aria2 RPC%></div>
+        <div class="value" id="card-aria2">—</div>
+    </div>
+    <div class="aria2bot-card">
+        <div class="icon">📥</div>
+        <div class="label"><%:Active Downloads%></div>
+        <div class="value" id="card-active">—</div>
+    </div>
+    <div class="aria2bot-card">
+        <div class="icon">🚀</div>
+        <div class="label"><%:Download Speed%></div>
+        <div class="value" id="card-speed">—</div>
+    </div>
+    <div class="aria2bot-card">
+        <div class="icon">⬆️</div>
+        <div class="label"><%:Upload Speed%></div>
+        <div class="value" id="card-up">—</div>
+    </div>
+    <div class="aria2bot-card">
+        <div class="icon">🗂️</div>
+        <div class="label"><%:Queued%></div>
+        <div class="value" id="card-queued">—</div>
+    </div>
+</div>
+
+<!-- Controls -->
+<h3><%:Service Controls%></h3>
+<div class="aria2bot-controls">
+    <button class="btn-green" onclick="svcAction('start_bot')">▶ Start Bot</button>
+    <button class="btn-red"   onclick="svcAction('stop_bot')">■ Stop Bot</button>
+    <button class="btn-blue"  onclick="svcAction('restart_bot')">↺ Restart Bot</button>
+    &nbsp;
+    <button class="btn-green" onclick="svcAction('start_aria2')">▶ Start Aria2</button>
+    <button class="btn-red"   onclick="svcAction('stop_aria2')">■ Stop Aria2</button>
+    <button class="btn-blue"  onclick="svcAction('restart_aria2')">↺ Restart Aria2</button>
+</div>
+<div id="action-msg" style="margin-bottom:16px;color:#555;font-size:.9em;"></div>
+
+<!-- Downloads Table -->
+<h3><%:Active Downloads%></h3>
+<div id="downloads-container">
+    <p id="no-downloads" style="color:#888"><%:No active downloads%></p>
+    <table class="downloads-table" id="downloads-table" style="display:none">
+        <thead>
+            <tr>
+                <th><%:Name%></th>
+                <th><%:Progress%></th>
+                <th><%:Size%></th>
+                <th><%:Speed%></th>
+                <th><%:GID%></th>
+            </tr>
+        </thead>
+        <tbody id="downloads-body"></tbody>
+    </table>
+</div>
+
+<!-- Log Tail -->
+<h3><%:Service Log%></h3>
+<div id="log-box">Loading log...</div>
+<button onclick="loadLog()" style="margin-top:6px;padding:4px 12px;font-size:.85em;">↻ Refresh Log</button>
+
+<script>
+(function() {
+
+function fmtSize(b) {
+    b = parseInt(b) || 0;
+    var u = ['B','KB','MB','GB','TB'], i = 0;
+    while (b >= 1024 && i < 4) { b /= 1024; i++; }
+    return b.toFixed(1) + ' ' + u[i];
+}
+
+function badge(ok, label) {
+    var cls = ok ? 'status-ok' : 'status-err';
+    return '<span class="status-badge ' + cls + '">' + (ok ? '● ' : '○ ') + label + '</span>';
+}
+
+function fetchStatus() {
+    fetch('<%=luci.dispatcher.build_url("admin","services","aria2bot","api","status")%>')
+    .then(r => r.json()).then(function(d) {
+        document.getElementById('card-bot').innerHTML =
+            badge(d.bot_running, d.bot_running ? 'Running' : 'Stopped');
+        document.getElementById('card-aria2').innerHTML =
+            badge(d.aria2_running, d.aria2_running ? 'Running' : 'Stopped');
+
+        if (!d.bot_token_set) {
+            document.getElementById('card-bot').innerHTML +=
+                '<br><small style="color:#dc3545">⚠ Token not set</small>';
+        }
+    }).catch(function() {
+        document.getElementById('card-bot').innerHTML = badge(false, 'Error');
+    });
+}
+
+function fetchAria2Stats() {
+    fetch('<%=luci.dispatcher.build_url("admin","services","aria2bot","api","aria2")%>?method=aria2.getGlobalStat')
+    .then(r => r.json()).then(function(d) {
+        if (!d.result) return;
+        var r = d.result;
+        document.getElementById('card-active').textContent = r.numActive || '0';
+        document.getElementById('card-queued').textContent = r.numWaiting || '0';
+        document.getElementById('card-speed').textContent  = fmtSize(r.downloadSpeed) + '/s';
+        document.getElementById('card-up').textContent     = fmtSize(r.uploadSpeed) + '/s';
+    }).catch(function() {
+        document.getElementById('card-active').textContent = '—';
+    });
+}
+
+function fetchActive() {
+    fetch('<%=luci.dispatcher.build_url("admin","services","aria2bot","api","aria2")%>?method=aria2.tellActive')
+    .then(r => r.json()).then(function(d) {
+        var tasks = (d.result) ? d.result : [];
+        var tbody = document.getElementById('downloads-body');
+        var table = document.getElementById('downloads-table');
+        var noMsg = document.getElementById('no-downloads');
+
+        tbody.innerHTML = '';
+        if (tasks.length === 0) {
+            table.style.display = 'none';
+            noMsg.style.display = '';
+            return;
+        }
+        table.style.display = '';
+        noMsg.style.display = 'none';
+
+        tasks.forEach(function(t) {
+            var files = t.files || [{}];
+            var path  = (files[0].path || 'Unknown');
+            var name  = path.split('/').pop() || path;
+            var total = parseInt(t.totalLength || 0);
+            var done  = parseInt(t.completedLength || 0);
+            var pct   = total > 0 ? (done / total * 100) : 0;
+            var speed = parseInt(t.downloadSpeed || 0);
+
+            var tr = document.createElement('tr');
+            tr.innerHTML = [
+                '<td title="' + name + '">' + name.substring(0,35) + (name.length>35?'…':'') + '</td>',
+                '<td><div class="progress-bar-wrap"><div class="progress-bar-fill" style="width:' + pct.toFixed(0) + '%"></div></div> ' + pct.toFixed(1) + '%</td>',
+                '<td>' + fmtSize(done) + ' / ' + fmtSize(total) + '</td>',
+                '<td>' + fmtSize(speed) + '/s</td>',
+                '<td><code>' + t.gid + '</code></td>'
+            ].join('');
+            tbody.appendChild(tr);
+        });
+    });
+}
+
+function svcAction(action) {
+    var msg = document.getElementById('action-msg');
+    msg.textContent = 'Executing...';
+    fetch('<%=luci.dispatcher.build_url("admin","services","aria2bot","api","service")%>?action=' + action)
+    .then(r => r.json()).then(function(d) {
+        msg.textContent = d.ok ? '✓ ' + d.msg : '✗ ' + d.msg;
+        setTimeout(function() { fetchStatus(); fetchAria2Stats(); }, 1500);
+    }).catch(function() {
+        msg.textContent = '✗ Request failed';
+    });
+}
+window.svcAction = svcAction;
+
+function loadLog() {
+    var box = document.getElementById('log-box');
+    var logs = ['/var/log/aria2bot.log', '/var/log/aria2rpc.log', '/var/log/aria2.log'];
+    var combined = '';
+    // Try tail via shell — fetch from API endpoint is simpler
+    box.textContent = 'Log not available via browser directly.\nCheck /var/log/aria2bot.log on device.';
+}
+
+function refresh() {
+    fetchStatus();
+    fetchAria2Stats();
+    fetchActive();
+}
+
+refresh();
+setInterval(refresh, 5000);
+loadLog();
+
+})();
+</script>
+
+<%+footer%>

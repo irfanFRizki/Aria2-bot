@@ -1,0 +1,215 @@
+name: Build OpenWrt IPK
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'package/aria2bot/**'
+      - 'luci-app-aria2bot/**'
+      - '.github/workflows/build-ipk.yml'
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      openwrt_version:
+        description: 'OpenWrt version to build against'
+        required: false
+        default: '23.05.3'
+
+env:
+  OPENWRT_VERSION: ${{ github.event.inputs.openwrt_version || '23.05.3' }}
+
+jobs:
+  # ── Job 1: Build aria2bot IPK ──────────────────────────────────────────
+  build-aria2bot:
+    name: Build aria2bot IPK
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            build-essential libncurses5-dev libncursesw5-dev \
+            zlib1g-dev gawk git gettext libssl-dev xsltproc \
+            rsync wget unzip python3 python3-distutils \
+            file curl zip
+
+      - name: Cache OpenWrt SDK
+        uses: actions/cache@v4
+        id: cache-sdk
+        with:
+          path: openwrt-sdk
+          key: openwrt-sdk-${{ env.OPENWRT_VERSION }}-x86_64-v2
+
+      - name: Download OpenWrt SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          SDK_URL="https://downloads.openwrt.org/releases/${{ env.OPENWRT_VERSION }}/targets/x86/64/openwrt-sdk-${{ env.OPENWRT_VERSION }}-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz"
+          echo "Downloading SDK from $SDK_URL"
+          wget -q --show-progress "$SDK_URL" -O sdk.tar.xz
+          mkdir -p openwrt-sdk
+          tar -xf sdk.tar.xz --strip-components=1 -C openwrt-sdk
+          rm sdk.tar.xz
+
+      - name: Setup SDK feeds
+        run: |
+          cd openwrt-sdk
+          cp feeds.conf.default feeds.conf
+          # Add luci feed if not present
+          grep -q "luci" feeds.conf || echo "src-git luci https://github.com/openwrt/luci.git;openwrt-23.05" >> feeds.conf
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Copy package into SDK
+        run: |
+          cp -r package/aria2bot openwrt-sdk/package/aria2bot
+          cp -r luci-app-aria2bot openwrt-sdk/package/luci-app-aria2bot
+
+      - name: Configure SDK
+        run: |
+          cd openwrt-sdk
+          make defconfig
+          # Enable our packages
+          echo "CONFIG_PACKAGE_aria2bot=m"          >> .config
+          echo "CONFIG_PACKAGE_luci-app-aria2bot=m" >> .config
+          make defconfig
+
+      - name: Build aria2bot package
+        run: |
+          cd openwrt-sdk
+          echo "Building aria2bot..."
+          make package/aria2bot/compile V=s 2>&1 | tee ../build-aria2bot.log
+          echo "EXIT_CODE: $?"
+
+      - name: Build luci-app-aria2bot package
+        run: |
+          cd openwrt-sdk
+          echo "Building luci-app-aria2bot..."
+          make package/luci-app-aria2bot/compile V=s 2>&1 | tee ../build-luci.log || true
+
+      - name: Collect built IPKs
+        run: |
+          mkdir -p artifacts
+          find openwrt-sdk/bin -name "aria2bot*.ipk" -exec cp {} artifacts/ \;
+          find openwrt-sdk/bin -name "luci-app-aria2bot*.ipk" -exec cp {} artifacts/ \;
+          ls -lh artifacts/
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            build-aria2bot.log
+            build-luci.log
+
+      - name: Upload IPK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: aria2bot-ipk-${{ github.sha }}
+          path: artifacts/*.ipk
+          if-no-files-found: warn
+
+  # ── Job 2: Release on tag ─────────────────────────────────────────────
+  release:
+    name: Create Release
+    needs: build-aria2bot
+    runs-on: ubuntu-22.04
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: aria2bot-ipk-*
+          merge-multiple: true
+          path: release-ipks/
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: "Aria2 Bot ${{ steps.version.outputs.VERSION }}"
+          body: |
+            ## Aria2 Telegram Bot for OpenWrt — ${{ steps.version.outputs.VERSION }}
+
+            ### Installation
+
+            ```sh
+            # On your OpenWrt router:
+            cd /tmp
+            wget https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}/aria2bot_${{ steps.version.outputs.VERSION }}_all.ipk
+            wget https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.VERSION }}/luci-app-aria2bot_${{ steps.version.outputs.VERSION }}_all.ipk
+
+            opkg install aria2bot_*.ipk
+            opkg install luci-app-aria2bot_*.ipk
+            ```
+
+            ### Setup
+            1. Go to **LuCI → Services → Aria2 Bot → Settings**
+            2. Enter your **Telegram Bot Token** (get from [@BotFather](https://t.me/BotFather))
+            3. Set your **Telegram User ID** in Allowed Users
+            4. **Save & Apply**
+            5. Start the service from the **Dashboard** tab
+
+            ### Changes
+            ${{ github.event.head_commit.message }}
+          files: release-ipks/*.ipk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── Job 3: Validate structure ─────────────────────────────────────────
+  validate:
+    name: Validate Package Structure
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required files exist
+        run: |
+          echo "Checking package structure..."
+          REQUIRED=(
+            "package/aria2bot/Makefile"
+            "package/aria2bot/files/usr/bin/telegram_download_bot.py"
+            "package/aria2bot/files/etc/init.d/aria2bot"
+            "package/aria2bot/files/etc/init.d/aria2rpc"
+            "package/aria2bot/files/etc/config/aria2bot"
+            "luci-app-aria2bot/Makefile"
+            "luci-app-aria2bot/luasrc/controller/aria2bot.lua"
+            "luci-app-aria2bot/luasrc/model/cbi/aria2bot/settings.lua"
+            "luci-app-aria2bot/luasrc/view/aria2bot/dashboard.htm"
+          )
+          FAIL=0
+          for f in "${REQUIRED[@]}"; do
+            if [ -f "$f" ]; then
+              echo "  ✓ $f"
+            else
+              echo "  ✗ MISSING: $f"
+              FAIL=1
+            fi
+          done
+          [ $FAIL -eq 0 ] && echo "All required files present!" || exit 1
+
+      - name: Validate Python script syntax
+        run: |
+          python3 -m py_compile package/aria2bot/files/usr/bin/telegram_download_bot.py
+          echo "✓ Python syntax OK"
+
+      - name: Check init.d scripts have correct shebang
+        run: |
+          for f in package/aria2bot/files/etc/init.d/*; do
+            head -1 "$f" | grep -q "rc.common" && echo "✓ $f" || { echo "✗ Bad shebang: $f"; exit 1; }
+          done
