@@ -1,0 +1,169 @@
+name: Build & Release IPK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y build-essential python3 git zip
+
+      - name: Get version info
+        id: version
+        run: |
+          VERSION="1.0.$(git rev-list --count HEAD)"
+          DATE=$(date +'%Y%m%d')
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          TAG="v${VERSION}-${DATE}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+
+          # Changelog dari commit messages
+          CHANGELOG=$(git log --oneline -10 --pretty=format:"- %s (%h)" 2>/dev/null || echo "- Initial release")
+          echo "changelog<<CLEOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "CLEOF" >> $GITHUB_OUTPUT
+
+      - name: Update version in Makefile
+        run: |
+          sed -i "s/PKG_VERSION:=.*/PKG_VERSION:=${{ steps.version.outputs.version }}/" \
+            package/luci-app-aria2-bot-IRF/Makefile
+
+      - name: Build IPK manually
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          PKG_NAME="luci-app-aria2-bot-IRF"
+          ARCH="all"
+          BUILD_DIR="build_tmp"
+
+          mkdir -p ${BUILD_DIR}/CONTROL
+          mkdir -p ${BUILD_DIR}/usr/bin
+          mkdir -p ${BUILD_DIR}/etc/init.d
+          mkdir -p ${BUILD_DIR}/etc/config
+          mkdir -p ${BUILD_DIR}/etc/uci-defaults
+          mkdir -p ${BUILD_DIR}/usr/lib/lua/luci/controller
+          mkdir -p ${BUILD_DIR}/usr/lib/lua/luci/model/cbi
+          mkdir -p ${BUILD_DIR}/usr/lib/lua/luci/view/aria2bot
+
+          # Copy files
+          cp package/${PKG_NAME}/root/usr/bin/telegram_download_bot.py ${BUILD_DIR}/usr/bin/
+          cp package/${PKG_NAME}/root/etc/init.d/telegram_bot ${BUILD_DIR}/etc/init.d/
+          cp package/${PKG_NAME}/root/etc/config/aria2bot ${BUILD_DIR}/etc/config/
+          cp package/${PKG_NAME}/root/etc/uci-defaults/luci-aria2bot ${BUILD_DIR}/etc/uci-defaults/
+          cp package/${PKG_NAME}/luasrc/controller/aria2bot.lua ${BUILD_DIR}/usr/lib/lua/luci/controller/
+          cp package/${PKG_NAME}/luasrc/model/cbi/aria2bot.lua ${BUILD_DIR}/usr/lib/lua/luci/model/cbi/
+          cp package/${PKG_NAME}/luasrc/view/aria2bot/dashboard.htm ${BUILD_DIR}/usr/lib/lua/luci/view/aria2bot/
+
+          # Set permissions
+          chmod 755 ${BUILD_DIR}/usr/bin/telegram_download_bot.py
+          chmod 755 ${BUILD_DIR}/etc/init.d/telegram_bot
+          chmod 755 ${BUILD_DIR}/etc/uci-defaults/luci-aria2bot
+          chmod 644 ${BUILD_DIR}/etc/config/aria2bot
+          chmod 644 ${BUILD_DIR}/usr/lib/lua/luci/controller/aria2bot.lua
+          chmod 644 ${BUILD_DIR}/usr/lib/lua/luci/model/cbi/aria2bot.lua
+          chmod 644 ${BUILD_DIR}/usr/lib/lua/luci/view/aria2bot/dashboard.htm
+
+          # CONTROL file
+          INSTALLED_SIZE=$(du -sk ${BUILD_DIR} | cut -f1)
+          cat > ${BUILD_DIR}/CONTROL/control << CTRL
+          Package: ${PKG_NAME}
+          Version: ${VERSION}
+          Architecture: ${ARCH}
+          Maintainer: irfanFRizki
+          Depends: libc, luci-base, python3, aria2, curl
+          Section: luci
+          Priority: optional
+          Description: Aria2 Telegram Download Bot LuCI interface by irfanFRizki
+          Installed-Size: ${INSTALLED_SIZE}
+          CTRL
+
+          # postinst
+          cat > ${BUILD_DIR}/CONTROL/postinst << 'POSTINST'
+          #!/bin/sh
+          [ -n "${IPKG_INSTROOT}" ] || {
+            /etc/uci-defaults/luci-aria2bot 2>/dev/null
+            /etc/init.d/telegram_bot enable
+            rm -rf /tmp/luci-*
+          }
+          exit 0
+          POSTINST
+          chmod 755 ${BUILD_DIR}/CONTROL/postinst
+
+          # prerm
+          cat > ${BUILD_DIR}/CONTROL/prerm << 'PRERM'
+          #!/bin/sh
+          [ -n "${IPKG_INSTROOT}" ] || {
+            /etc/init.d/telegram_bot stop 2>/dev/null
+            /etc/init.d/telegram_bot disable 2>/dev/null
+          }
+          exit 0
+          PRERM
+          chmod 755 ${BUILD_DIR}/CONTROL/prerm
+
+          # Build IPK (tar.gz of data + control)
+          cd ${BUILD_DIR}
+          tar czf ../data.tar.gz --exclude=./CONTROL .
+          tar czf ../control.tar.gz -C CONTROL .
+          cd ..
+          echo "2.0" > debian-binary
+          tar czf "${PKG_NAME}_${VERSION}_${ARCH}.ipk" debian-binary data.tar.gz control.tar.gz
+          rm -f debian-binary data.tar.gz control.tar.gz
+          rm -rf ${BUILD_DIR}
+
+          echo "IPK_FILE=${PKG_NAME}_${VERSION}_${ARCH}.ipk" >> $GITHUB_ENV
+          ls -lh *.ipk
+
+      - name: Create ZIP release package
+        run: |
+          ZIP_NAME="luci-app-aria2-bot-IRF-${{ steps.version.outputs.tag }}.zip"
+          zip -r "${ZIP_NAME}" package/ .github/ README.md install.sh 2>/dev/null || \
+          zip -r "${ZIP_NAME}" package/ .github/ README.md
+          echo "ZIP_FILE=${ZIP_NAME}" >> $GITHUB_ENV
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "Aria2 Bot ${{ steps.version.outputs.tag }}"
+          body: |
+            ## 🤖 Aria2 Bot - Telegram Download Bot untuk OpenWrt
+
+            ### Cara Install di OpenWrt:
+            ```bash
+            opkg update
+            opkg install wget
+            wget https://github.com/irfanFRizki/Aria2-bot/releases/download/${{ steps.version.outputs.tag }}/${{ env.IPK_FILE }} -O /tmp/aria2bot.ipk
+            opkg install /tmp/aria2bot.ipk
+            ```
+
+            Setelah install, buka LuCI → **Services → Aria2 Bot → Settings** dan isi:
+            - Bot Token (dari @BotFather)
+            - Allowed User IDs
+
+            ### 📝 Changelog:
+            ${{ steps.version.outputs.changelog }}
+
+            ---
+            **Commit:** ${{ steps.version.outputs.short_sha }} | **Built:** $(date -u +'%Y-%m-%d %H:%M UTC')
+          files: |
+            ${{ env.IPK_FILE }}
+            ${{ env.ZIP_FILE }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

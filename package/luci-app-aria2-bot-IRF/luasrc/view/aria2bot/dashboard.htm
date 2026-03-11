@@ -1,0 +1,217 @@
+<%+header%>
+
+<style>
+.status-card {
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.status-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: bold;
+}
+.badge-ok      { background: #d4edda; color: #155724; }
+.badge-err     { background: #f8d7da; color: #721c24; }
+.badge-warn    { background: #fff3cd; color: #856404; }
+.stat-box {
+  display: inline-block;
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  padding: 10px 18px;
+  margin: 4px;
+  text-align: center;
+  min-width: 90px;
+}
+.stat-num { font-size: 24px; font-weight: bold; color: #333; }
+.stat-lbl { font-size: 11px; color: #666; }
+.btn-group button { margin: 4px 4px 4px 0; }
+#log-box {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  font-family: monospace;
+  font-size: 12px;
+  padding: 12px;
+  border-radius: 6px;
+  height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+.dep-row { display: flex; align-items: center; gap: 10px; margin: 5px 0; }
+.dep-icon { font-size: 16px; }
+</style>
+
+<h2><img src="<%=resource%>/icons/services.gif" alt="" style="vertical-align:middle;margin-right:6px"/><%:Aria2 Bot Dashboard%></h2>
+
+<!-- Service Control -->
+<div class="status-card">
+  <h3 style="margin-top:0">🤖 <%:Service Control%></h3>
+  <div style="margin-bottom:12px">
+    <strong><%:Bot Status:%></strong>&nbsp;
+    <span id="bot-status" class="status-badge badge-warn">⏳ Loading...</span>
+    &nbsp;&nbsp;
+    <strong><%:Aria2 Status:%></strong>&nbsp;
+    <span id="aria2-status" class="status-badge badge-warn">⏳ Loading...</span>
+  </div>
+  <div class="btn-group">
+    <button class="btn cbi-button cbi-button-apply" onclick="serviceAction('start')">▶ <%:Start Bot%></button>
+    <button class="btn cbi-button cbi-button-reset" onclick="serviceAction('stop')">⏹ <%:Stop Bot%></button>
+    <button class="btn cbi-button" onclick="serviceAction('restart')" style="background:#6c757d;color:#fff">🔄 <%:Restart Bot%></button>
+    <button class="btn cbi-button" onclick="serviceAction('start_aria2')" style="background:#17a2b8;color:#fff">▶ <%:Start Aria2%></button>
+  </div>
+</div>
+
+<!-- Download Stats -->
+<div class="status-card">
+  <h3 style="margin-top:0">📊 <%:Download Statistics%></h3>
+  <div id="dl-stats">
+    <div class="stat-box"><div class="stat-num" id="dl-active">-</div><div class="stat-lbl"><%:Active%></div></div>
+    <div class="stat-box"><div class="stat-num" id="dl-waiting">-</div><div class="stat-lbl"><%:Waiting%></div></div>
+    <div class="stat-box"><div class="stat-num" id="dl-stopped">-</div><div class="stat-lbl"><%:Stopped%></div></div>
+  </div>
+  <div style="margin-top:8px">
+    <span id="rpc-status" class="status-badge badge-warn">⏳ Checking RPC...</span>
+  </div>
+</div>
+
+<!-- Dependency Check -->
+<div class="status-card">
+  <h3 style="margin-top:0">🔍 <%:Dependency Check%></h3>
+  <div id="dep-list">
+    <div class="dep-row"><span class="dep-icon">⏳</span> <%:Checking...%></div>
+  </div>
+  <div style="margin-top:10px">
+    <button class="btn cbi-button cbi-button-apply" onclick="serviceAction('install_deps')">
+      📦 <%:Auto Install Dependencies%>
+    </button>
+    <small style="display:block;margin-top:5px;color:#666"><%:Will install: python3, aria2, curl, python-telegram-bot, aiohttp%></small>
+  </div>
+</div>
+
+<!-- Logs -->
+<div class="status-card">
+  <h3 style="margin-top:0">📜 <%:Live Logs%></h3>
+  <div id="log-box"><%:Loading logs...%></div>
+  <button class="btn cbi-button" onclick="loadLogs()" style="margin-top:8px;background:#6c757d;color:#fff">🔄 <%:Refresh Logs%></button>
+</div>
+
+<!-- Toast -->
+<div id="toast" style="display:none;position:fixed;bottom:20px;right:20px;background:#333;color:#fff;padding:12px 20px;border-radius:8px;z-index:9999;font-size:14px"></div>
+
+<script>
+var BASE = '<%=luci.dispatcher.build_url("admin","services","aria2bot")%>';
+
+function showToast(msg, ok) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.background = ok ? '#28a745' : '#dc3545';
+  t.style.display = 'block';
+  setTimeout(function(){ t.style.display='none'; }, 3000);
+}
+
+function setBadge(id, text, cls) {
+  var el = document.getElementById(id);
+  el.textContent = text;
+  el.className = 'status-badge ' + cls;
+}
+
+function updateStatus() {
+  var xhr = new XMLHttpRequest();
+  xhr.open('GET', BASE + '/status', true);
+  xhr.onload = function() {
+    if (xhr.status === 200) {
+      var d = JSON.parse(xhr.responseText);
+
+      // Bot status
+      setBadge('bot-status',
+        d.bot_running ? '✅ Running' : '⛔ Stopped',
+        d.bot_running ? 'badge-ok' : 'badge-err');
+
+      // Aria2 status
+      setBadge('aria2-status',
+        d.aria2_running ? '✅ Running' : '⛔ Stopped',
+        d.aria2_running ? 'badge-ok' : 'badge-err');
+
+      // RPC status
+      setBadge('rpc-status',
+        d.rpc_ok ? '✅ Aria2 RPC OK' : '⚠️ Aria2 RPC tidak tersambung',
+        d.rpc_ok ? 'badge-ok' : 'badge-warn');
+
+      // DL stats
+      document.getElementById('dl-active').textContent  = d.dl_active;
+      document.getElementById('dl-waiting').textContent = d.dl_waiting;
+      document.getElementById('dl-stopped').textContent = d.dl_stopped;
+
+      // Dependencies
+      var deps = [
+        { name: 'Python3',             ok: d.python3_ok },
+        { name: 'python-telegram-bot', ok: d.pylib_ok },
+        { name: 'aiohttp',             ok: d.aiohttp_ok },
+        { name: 'Aria2',               ok: d.aria2_running },
+        { name: 'Bot Token',           ok: d.token_set },
+      ];
+      var html = '';
+      deps.forEach(function(dep) {
+        html += '<div class="dep-row">' +
+          '<span class="dep-icon">' + (dep.ok ? '✅' : '❌') + '</span>' +
+          '<span>' + dep.name + '</span>' +
+          (dep.ok ? '' : '<span style="color:#dc3545;font-size:12px">— Tidak ditemukan / belum diset</span>') +
+          '</div>';
+      });
+      document.getElementById('dep-list').innerHTML = html;
+    }
+  };
+  xhr.send();
+}
+
+function serviceAction(act) {
+  var labels = {start:'Starting...', stop:'Stopping...', restart:'Restarting...', start_aria2:'Starting Aria2...', install_deps:'Installing dependencies...'};
+  showToast(labels[act] || act, true);
+  var xhr = new XMLHttpRequest();
+  xhr.open('POST', BASE + '/action', true);
+  xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+  xhr.onload = function() {
+    if (xhr.status === 200) {
+      var r = JSON.parse(xhr.responseText);
+      showToast(r.msg, r.ok);
+      setTimeout(updateStatus, 1500);
+    }
+  };
+  xhr.send('action=' + act);
+}
+
+function loadLogs() {
+  var xhr = new XMLHttpRequest();
+  xhr.open('GET', '/cgi-bin/luci/command?cmd=logread+-e+telegram_bot+-e+aria2bot+-n+80', true);
+  xhr.onload = function() {
+    var box = document.getElementById('log-box');
+    box.textContent = xhr.responseText || '(Tidak ada log)';
+    box.scrollTop = box.scrollHeight;
+  };
+  xhr.onerror = function() {
+    var box = document.getElementById('log-box');
+    box.textContent = 'Untuk melihat log, jalankan di terminal:\n  logread -e telegram_bot -e aria2bot';
+  };
+  xhr.send();
+
+  // Fallback: show command hint
+  setTimeout(function(){
+    if (document.getElementById('log-box').textContent === '<%:Loading logs...%>') {
+      document.getElementById('log-box').textContent = 'Jalankan di terminal SSH:\n  logread -e telegram_bot -f\n\nAtau:\n  logread -e aria2bot';
+    }
+  }, 2000);
+}
+
+// Init
+updateStatus();
+loadLogs();
+setInterval(updateStatus, 10000);
+</script>
+
+<%+footer%>

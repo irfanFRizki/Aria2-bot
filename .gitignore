@@ -1,0 +1,9 @@
+*.ipk
+*.tar.gz
+build_tmp/
+debian-binary
+data.tar.gz
+control.tar.gz
+__pycache__/
+*.pyc
+.DS_Store

@@ -1,0 +1,112 @@
+#!/bin/sh /etc/rc.common
+# Telegram Download Bot - procd init script
+# /etc/init.d/telegram_bot
+
+START=99
+STOP=10
+USE_PROCD=1
+
+PROG=/usr/bin/python3
+BOT_SCRIPT=/usr/bin/telegram_download_bot.py
+BOT_NAME="telegram_bot"
+CONFIG_FILE=/etc/config/aria2bot
+PATCHED_SCRIPT=/tmp/telegram_bot_runtime.py
+
+_info() { logger -p daemon.info -t "$BOT_NAME" "$*"; }
+_err()  { logger -p daemon.err  -t "$BOT_NAME" "$*"; }
+
+check_aria2() {
+  pgrep -x aria2c > /dev/null 2>&1
+}
+
+patch_config() {
+  local token=$(uci -q get aria2bot.main.bot_token)
+  local users=$(uci -q get aria2bot.main.allowed_users)
+  local rpc_url=$(uci -q get aria2bot.main.aria2_rpc_url)
+  local rpc_secret=$(uci -q get aria2bot.main.aria2_rpc_secret)
+  local max_dl=$(uci -q get aria2bot.main.max_concurrent_downloads)
+
+  [ -z "$token" ] && { _err "Bot token tidak diset! Isi di LuCI Services > Aria2 Bot > Settings"; return 1; }
+
+  cp "$BOT_SCRIPT" "$PATCHED_SCRIPT"
+
+  # Patch token
+  sed -i "s|TELEGRAM_BOT_TOKEN = \".*\"|TELEGRAM_BOT_TOKEN = \"${token}\"|g" "$PATCHED_SCRIPT"
+
+  # Patch RPC URL
+  [ -n "$rpc_url" ] && sed -i "s|ARIA2_RPC_URL = \".*\"|ARIA2_RPC_URL = \"${rpc_url}\"|g" "$PATCHED_SCRIPT"
+
+  # Patch RPC Secret
+  [ -n "$rpc_secret" ] && sed -i "s|ARIA2_RPC_SECRET = \".*\"|ARIA2_RPC_SECRET = \"${rpc_secret}\"|g" "$PATCHED_SCRIPT"
+
+  # Patch max concurrent downloads
+  [ -n "$max_dl" ] && sed -i "s|MAX_CONCURRENT_DOWNLOADS = [0-9]*|MAX_CONCURRENT_DOWNLOADS = ${max_dl}|g" "$PATCHED_SCRIPT"
+
+  # Inject allowed users check if users are set
+  if [ -n "$users" ]; then
+    python3 - "$PATCHED_SCRIPT" "$users" << 'PYEOF'
+import sys, re
+
+script_path = sys.argv[1]
+users_raw = sys.argv[2]
+user_ids = [u.strip() for u in users_raw.split(',') if u.strip()]
+user_list = ', '.join(user_ids)
+
+with open(script_path, 'r') as f:
+    content = f.read()
+
+# Replace or inject ALLOWED_USERS
+if 'ALLOWED_USERS' in content:
+    content = re.sub(r'ALLOWED_USERS\s*=\s*\[.*?\]', f'ALLOWED_USERS = [{user_list}]', content, flags=re.DOTALL)
+else:
+    inject = f'\n# Injected by UCI config\nALLOWED_USERS = [{user_list}]\n'
+    content = content.replace('TELEGRAM_BOT_TOKEN', inject + 'TELEGRAM_BOT_TOKEN', 1)
+
+with open(script_path, 'w') as f:
+    f.write(content)
+PYEOF
+  fi
+
+  chmod +x "$PATCHED_SCRIPT"
+  return 0
+}
+
+start_service() {
+  [ -f "$BOT_SCRIPT" ] || { _err "Bot script tidak ditemukan: $BOT_SCRIPT"; return 1; }
+  command -v python3 >/dev/null 2>&1 || { _err "Python3 tidak ditemukan. Install: opkg install python3"; return 1; }
+
+  if ! check_aria2; then
+    _info "Aria2 tidak berjalan, mencoba start..."
+    [ -f /etc/init.d/aria2 ] && /etc/init.d/aria2 start && sleep 3
+  fi
+
+  patch_config || return 1
+
+  _info "Memulai Telegram Download Bot..."
+
+  procd_open_instance
+  procd_set_param command "$PROG" "$PATCHED_SCRIPT"
+  procd_set_param respawn 3600 10 5
+  procd_set_param stdout 1
+  procd_set_param stderr 1
+  procd_set_param pidfile /var/run/${BOT_NAME}.pid
+  procd_set_param file "$CONFIG_FILE"
+  procd_close_instance
+
+  _info "Bot started OK"
+}
+
+stop_service() {
+  _info "Bot stopped"
+  rm -f "$PATCHED_SCRIPT"
+}
+
+reload_service() {
+  stop
+  sleep 2
+  start
+}
+
+service_triggers() {
+  procd_add_reload_trigger "aria2bot"
+}

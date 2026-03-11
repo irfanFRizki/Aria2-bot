@@ -1,0 +1,4 @@
+#!/bin/sh
+# Post-install: enable bot service
+/etc/init.d/telegram_bot enable
+exit 0

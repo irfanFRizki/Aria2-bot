@@ -1,0 +1,255 @@
+<%+header%>
+
+<style>
+.aria2bot-card {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    padding: 20px;
+    margin-bottom: 20px;
+}
+.aria2bot-card h3 {
+    margin-top: 0;
+    border-bottom: 2px solid #2196F3;
+    padding-bottom: 8px;
+    color: #1565C0;
+}
+.status-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-weight: bold;
+    font-size: 13px;
+}
+.status-running  { background: #C8E6C9; color: #1B5E20; }
+.status-stopped  { background: #FFCDD2; color: #B71C1C; }
+.status-ok       { background: #C8E6C9; color: #1B5E20; }
+.status-missing  { background: #FFCDD2; color: #B71C1C; }
+.status-warn     { background: #FFF9C4; color: #F57F17; }
+.btn-group { margin: 10px 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.btn-action {
+    padding: 8px 18px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    transition: opacity 0.2s;
+}
+.btn-action:hover { opacity: 0.85; }
+.btn-start   { background: #4CAF50; color: #fff; }
+.btn-stop    { background: #f44336; color: #fff; }
+.btn-restart { background: #FF9800; color: #fff; }
+.btn-install { background: #2196F3; color: #fff; }
+.btn-enable  { background: #9C27B0; color: #fff; }
+.dep-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid #f0f0f0; }
+.dep-row:last-child { border-bottom: none; }
+.dep-name { min-width: 150px; font-weight: 500; }
+#log-box {
+    background: #1a1a2e;
+    color: #00e676;
+    font-family: monospace;
+    font-size: 12px;
+    padding: 12px;
+    border-radius: 6px;
+    height: 220px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+#toast {
+    position: fixed; bottom: 30px; right: 30px;
+    background: #323232; color: #fff;
+    padding: 12px 22px; border-radius: 6px;
+    display: none; z-index: 9999;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+.info-row { display: flex; align-items: center; gap: 12px; padding: 6px 0; }
+.info-label { min-width: 180px; color: #666; }
+</style>
+
+<div id="toast"></div>
+
+<h2>🤖 <%:Aria2 Bot - Dashboard%></h2>
+
+<div class="aria2bot-card">
+    <h3>📊 <%:Status Layanan%></h3>
+    <div class="info-row">
+        <span class="info-label"><%:Bot Telegram%>:</span>
+        <span id="status-bot" class="status-badge status-stopped">⏳ Memuat...</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label"><%:Aria2 RPC%>:</span>
+        <span id="status-aria2" class="status-badge status-stopped">⏳ Memuat...</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label"><%:Autostart saat boot%>:</span>
+        <span id="status-autostart" class="status-badge status-stopped">⏳ Memuat...</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label"><%:Bot Token%>:</span>
+        <span id="status-token" class="status-badge status-warn">⏳ Memuat...</span>
+    </div>
+    <div class="info-row">
+        <span class="info-label"><%:Versi Paket%>:</span>
+        <span id="pkg-version" style="font-weight:bold; color:#1565C0;">v1.0.0</span>
+    </div>
+
+    <div class="btn-group">
+        <button class="btn-action btn-start"   onclick="serviceAction('start')">▶ Start</button>
+        <button class="btn-action btn-stop"    onclick="serviceAction('stop')">■ Stop</button>
+        <button class="btn-action btn-restart" onclick="serviceAction('restart')">↺ Restart</button>
+        <button class="btn-action btn-enable"  onclick="serviceAction('enable')">🔁 Enable Autostart</button>
+        <button class="btn-action btn-stop"    onclick="serviceAction('disable')">🚫 Disable Autostart</button>
+        <button class="btn-action btn-install" onclick="refreshStatus()">🔄 Refresh</button>
+    </div>
+</div>
+
+<div class="aria2bot-card">
+    <h3>🔧 <%:Dependency Status%></h3>
+    <div id="dep-list">
+        <div class="dep-row">
+            <span class="dep-name">Python3</span>
+            <span id="dep-python3" class="status-badge status-stopped">⏳</span>
+        </div>
+        <div class="dep-row">
+            <span class="dep-name">python-telegram-bot</span>
+            <span id="dep-pytba" class="status-badge status-stopped">⏳</span>
+        </div>
+        <div class="dep-row">
+            <span class="dep-name">aiohttp</span>
+            <span id="dep-aiohttp" class="status-badge status-stopped">⏳</span>
+        </div>
+        <div class="dep-row">
+            <span class="dep-name">aria2</span>
+            <span id="dep-aria2" class="status-badge status-stopped">⏳</span>
+        </div>
+    </div>
+    <div class="btn-group" style="margin-top:12px;">
+        <button class="btn-action btn-install" onclick="installDeps()">
+            📦 Auto-Install Dependency
+        </button>
+    </div>
+    <p style="color:#888; font-size:12px; margin:6px 0 0;">
+        <%:Install otomatis: python3-pip, python-telegram-bot, aiohttp, aria2%>
+    </p>
+</div>
+
+<div class="aria2bot-card">
+    <h3>📋 <%:Log Bot (20 baris terakhir)%></h3>
+    <div id="log-box">Memuat log...</div>
+    <div class="btn-group" style="margin-top:10px;">
+        <button class="btn-action btn-install" onclick="refreshStatus()">🔄 Refresh Log</button>
+    </div>
+</div>
+
+<script>
+function showToast(msg, duration) {
+    var t = document.getElementById('toast');
+    t.textContent = msg;
+    t.style.display = 'block';
+    setTimeout(function(){ t.style.display = 'none'; }, duration || 3000);
+}
+
+function badge(running, labelOk, labelFail) {
+    if (running) {
+        return '<span class="status-badge status-running">✅ ' + labelOk + '</span>';
+    }
+    return '<span class="status-badge status-stopped">❌ ' + labelFail + '</span>';
+}
+
+function refreshStatus() {
+    fetch('<%=luci.dispatcher.build_url("admin","services","aria2bot","status")%>')
+        .then(function(r){ return r.json(); })
+        .then(function(d) {
+            document.getElementById('status-bot').outerHTML =
+                '<span id="status-bot" class="status-badge ' +
+                (d.bot_running ? 'status-running">✅ Running' : 'status-stopped">❌ Stopped') + '</span>';
+
+            document.getElementById('status-aria2').outerHTML =
+                '<span id="status-aria2" class="status-badge ' +
+                (d.aria2_running ? 'status-running">✅ Running' : 'status-stopped">❌ Stopped') + '</span>';
+
+            document.getElementById('status-autostart').outerHTML =
+                '<span id="status-autostart" class="status-badge ' +
+                (d.autostart ? 'status-running">✅ Enabled' : 'status-warn">⚠ Disabled') + '</span>';
+
+            document.getElementById('status-token').outerHTML =
+                '<span id="status-token" class="status-badge ' +
+                (d.token_set ? 'status-ok">' + d.token_display : 'status-stopped">❌ Belum diisi') + '</span>';
+
+            document.getElementById('dep-python3').outerHTML =
+                '<span id="dep-python3" class="status-badge ' +
+                (d.python3_ok ? 'status-ok">✅ Terinstall' : 'status-stopped">❌ Tidak ada') + '</span>';
+
+            document.getElementById('dep-pytba').outerHTML =
+                '<span id="dep-pytba" class="status-badge ' +
+                (d.pytba_ok ? 'status-ok">✅ Terinstall' : 'status-stopped">❌ Tidak ada') + '</span>';
+
+            document.getElementById('dep-aiohttp').outerHTML =
+                '<span id="dep-aiohttp" class="status-badge ' +
+                (d.aiohttp_ok ? 'status-ok">✅ Terinstall' : 'status-stopped">❌ Tidak ada') + '</span>';
+
+            document.getElementById('dep-aria2').outerHTML =
+                '<span id="dep-aria2" class="status-badge ' +
+                (d.aria2_running ? 'status-ok">✅ Running' : 'status-stopped">❌ Tidak jalan') + '</span>';
+
+            // Log
+            var logBox = document.getElementById('log-box');
+            if (d.log_lines && d.log_lines.length > 0) {
+                logBox.textContent = d.log_lines.join('\n');
+            } else {
+                logBox.textContent = '[Tidak ada log tersedia]';
+            }
+            logBox.scrollTop = logBox.scrollHeight;
+
+            if (d.version) {
+                document.getElementById('pkg-version').textContent = 'v' + d.version;
+            }
+        })
+        .catch(function(e) {
+            showToast('❌ Gagal memuat status: ' + e.message);
+        });
+}
+
+function serviceAction(cmd) {
+    var labels = {
+        start: 'Memulai bot...', stop: 'Menghentikan bot...',
+        restart: 'Merestart bot...', enable: 'Mengaktifkan autostart...',
+        disable: 'Menonaktifkan autostart...'
+    };
+    showToast('⏳ ' + (labels[cmd] || cmd), 4000);
+
+    fetch('<%=luci.dispatcher.build_url("admin","services","aria2bot","action")%>', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'cmd=' + cmd
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+        showToast(d.success ? '✅ ' + d.message : '❌ ' + d.message, 4000);
+        setTimeout(refreshStatus, 1500);
+    })
+    .catch(function(e){ showToast('❌ Error: ' + e.message); });
+}
+
+function installDeps() {
+    showToast('⏳ Menjalankan instalasi dependency... (bisa 2-5 menit)', 8000);
+    fetch('<%=luci.dispatcher.build_url("admin","services","aria2bot","install_deps")%>', {
+        method: 'POST'
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+        showToast(d.message, 6000);
+        setTimeout(refreshStatus, 3000);
+    })
+    .catch(function(e){ showToast('❌ Error: ' + e.message); });
+}
+
+// Load status saat halaman dibuka
+refreshStatus();
+// Auto-refresh setiap 10 detik
+setInterval(refreshStatus, 10000);
+</script>
+
+<%+footer%>

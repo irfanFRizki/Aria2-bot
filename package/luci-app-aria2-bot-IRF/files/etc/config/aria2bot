@@ -1,0 +1,7 @@
+config aria2bot 'main'
+	option bot_token ''
+	option aria2_url 'http://localhost:6800/jsonrpc'
+	option aria2_secret ''
+	option max_concurrent '2'
+	option max_retry '3'
+	option enabled '0'
