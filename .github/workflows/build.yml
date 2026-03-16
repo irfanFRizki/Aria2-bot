@@ -1,0 +1,17 @@
+name: Build IPK
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Build
+        uses: sbwml/openwrt-gh-action-sdk@main
+        env:
+          ARCH: aarch64_generic
+          PACKAGES: luci-app-aria2-bot-IRF
+      - name: Upload
+        uses: actions/upload-artifact@v3
+        with:
+          name: luci-app-aria2-bot-IRF
+          path: bin/packages/*/custom/*.ipk
