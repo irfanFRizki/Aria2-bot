@@ -1,0 +1,18 @@
+{
+  "luci-app-aria2-bot-IRF": {
+    "description": "Grant access to Aria2 Bot",
+    "read": {
+      "uci": ["aria2bot"],
+      "ubus": {
+        "luci-rpc": ["getPackageInfo", "getDirList"],
+        "service": ["list"]
+      },
+      "file": {
+        "/usr/bin/telegram_download_bot.py": ["read"]
+      }
+    },
+    "write": {
+      "uci": ["aria2bot"]
+    }
+  }
+}

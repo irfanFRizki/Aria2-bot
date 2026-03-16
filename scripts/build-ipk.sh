@@ -23,6 +23,7 @@ install -Dm755 root/etc/init.d/telegram_bot           "${DATA_DIR}/etc/init.d/te
 install -Dm644 root/etc/config/aria2bot               "${DATA_DIR}/etc/config/aria2bot"
 install -Dm755 root/etc/uci-defaults/luci-aria2bot    "${DATA_DIR}/etc/uci-defaults/luci-aria2bot"
 install -Dm755 root/etc/aria2bot/install-deps.sh      "${DATA_DIR}/etc/aria2bot/install-deps.sh"
+install -Dm644 root/usr/share/rpcd/acl.d/luci-app-aria2bot.json "${DATA_DIR}/usr/share/rpcd/acl.d/luci-app-aria2bot.json"
 
 INSTALLED_SIZE=$(du -sk "$DATA_DIR" | awk '{print $1}')
 
@@ -42,6 +43,7 @@ cat > "${CTRL_DIR}/postinst" << 'POSTINST'
 #!/bin/sh
 chmod +x /etc/init.d/aria2rpc /etc/init.d/telegram_bot 2>/dev/null || true
 chmod +x /etc/aria2bot/install-deps.sh /usr/bin/telegram_download_bot.py 2>/dev/null || true
+install -Dm644 root/usr/share/rpcd/acl.d/luci-app-aria2bot.json "${DATA_DIR}/usr/share/rpcd/acl.d/luci-app-aria2bot.json"
 [ -f /etc/uci-defaults/luci-aria2bot ] && sh /etc/uci-defaults/luci-aria2bot && rm -f /etc/uci-defaults/luci-aria2bot
 rm -rf /tmp/luci-* /tmp/luci_* 2>/dev/null || true
 echo "✅ Aria2 Bot installed! Buka LuCI > Services > Aria2 Bot > Settings"
