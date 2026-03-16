@@ -62,7 +62,9 @@ chmod 755 "${CTRL_DIR}/postinst" "${CTRL_DIR}/prerm"
 printf '2.0\n' > "${BUILD_DIR}/debian-binary"
 
 mkdir -p "$DIST_DIR"
-( cd "${BUILD_DIR}" && ar r "${OLDPWD}/${DIST_DIR}/${IPK_FILE}" debian-binary control.tar.gz data.tar.gz )
+( cd "${BUILD_DIR}" && tar --numeric-owner --group=0 --owner=0 -czf \
+    "${OLDPWD}/${DIST_DIR}/${IPK_FILE}" \
+    ./debian-binary ./control.tar.gz ./data.tar.gz )
 
 rm -rf "$BUILD_DIR"
 echo "✅ DONE: ${DIST_DIR}/${IPK_FILE} ($(du -sh ${DIST_DIR}/${IPK_FILE} | cut -f1))"
